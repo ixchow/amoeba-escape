@@ -17,6 +17,7 @@ const SPRITES = {
 	undo:{x:61, y:261, width:31, height:8},
 	reset:{x:61, y:271, width:36, height:8},
 	next:{x:61, y:251, width:31, height:8},
+	title:{x:1, y:1, width:120, height:90},
 };
 
 const TILES = {
@@ -140,6 +141,8 @@ let board = {
 	doors:[ ]
 };
 
+let picture = null;
+
 let undoStack = [];
 
 //wires go from center of tile to edge:
@@ -260,19 +263,25 @@ function cloneBoard(b) {
 }
 
 function undo() {
-	if (undoStack.length) {
-		board = undoStack.pop();
+	if (board) {
+		if (undoStack.length) {
+			board = undoStack.pop();
+		}
 	}
 }
 
 function reset() {
-	if (undoStack.length) {
-		undoStack.push(board);
-		board = cloneBoard(undoStack[0]);
+	if (board) {
+		if (undoStack.length) {
+			undoStack.push(board);
+			board = cloneBoard(undoStack[0]);
+		}
 	}
 }
 
 const LEVELS = [
+	{picture:SPRITES.title
+	},
 	{title:"click to grow",
 	board:[
 		"#######",
@@ -324,6 +333,7 @@ const LEVELS = [
 ];
 
 LEVELS.forEach(function(level){
+	if (level.picture) return;
 	console.log(level.title);
 	level.board = makeBoard(level.board, level.layers, level.library);
 });
@@ -340,7 +350,13 @@ let currentLevel;
 function setLevel(idx) {
 	currentLevel = idx;
 	maxLevel = Math.max(maxLevel, currentLevel);
-	setBoard(LEVELS[currentLevel].board);
+	if (LEVELS[currentLevel].picture) {
+		picture = LEVELS[currentLevel].picture;
+		board = null;
+	} else {
+		picture = null;
+		setBoard(LEVELS[currentLevel].board);
+	}
 }
 
 if (document.location.search.match(/^\?\d+/)) {
@@ -360,14 +376,16 @@ function draw() {
 	ctx.fillStyle = '#000';
 	ctx.fillRect(0,0, ctx.width,ctx.height);
 
-	board.offset = {
-		x:Math.floor((ctx.width - board.size.x*TILE_SIZE)/2),
-		y:Math.floor((ctx.height - board.size.y*TILE_SIZE)/2)
-	};
+	if (board) {
+		board.offset = {
+			x:Math.floor((ctx.width - board.size.x*TILE_SIZE)/2),
+			y:Math.floor((ctx.height - board.size.y*TILE_SIZE)/2)
+		};
 
-	if (mouse.x === mouse.x) {
-		mouse.tx = Math.floor((mouse.x - board.offset.x) / TILE_SIZE);
-		mouse.ty = Math.floor((mouse.y - board.offset.y) / TILE_SIZE);
+		if (mouse.x === mouse.x) {
+			mouse.tx = Math.floor((mouse.x - board.offset.x) / TILE_SIZE);
+			mouse.ty = Math.floor((mouse.y - board.offset.y) / TILE_SIZE);
+		}
 	}
 
 	function drawSprite(x,y,sprite) {
@@ -376,6 +394,10 @@ function draw() {
 		ctx.drawImage(TILES_IMG, sprite.x, sprite.y, sprite.width, sprite.height, 0, 0, sprite.width, sprite.height);
 		ctx.restore();
 	}
+
+	if (picture) {
+		drawSprite(0,ctx.height-picture.height, picture);
+	} else {
 
 	ctx.setTransform(1,0, 0,-1, board.offset.x,canvas.height-board.offset.y);
 
@@ -607,13 +629,15 @@ function draw() {
 		}
 	}
 
+	} //end if(picture) else 
+
 	ctx.setTransform(1,0, 0,-1, 0,canvas.height);
 
 	ctx.fillStyle = '#444';
-	if (mouse.overReset) {
+	if (mouse.overReset && board) {
 		ctx.fillRect(1,1,SPRITES.reset.width, SPRITES.reset.height);
 	}
-	if (mouse.overUndo) {
+	if (mouse.overUndo && board) {
 		ctx.fillRect(ctx.width-1-SPRITES.undo.width,1,SPRITES.undo.width, SPRITES.undo.height);
 	}
 
@@ -624,8 +648,10 @@ function draw() {
 		drawSprite(Math.floor((ctx.width-SPRITES.next.width)/2), 10, SPRITES.next);
 	}
 
-	drawSprite(1,1, SPRITES.reset);
-	drawSprite(ctx.width-1-SPRITES.undo.width,1, SPRITES.undo);
+	if (board) {
+		drawSprite(1,1, SPRITES.reset);
+		drawSprite(ctx.width-1-SPRITES.undo.width,1, SPRITES.undo);
+	}
 
 	//draw mouse:
 	if (mouse.x === mouse.x) {
@@ -672,7 +698,7 @@ function isSolid(tx, ty) {
 }
 
 function isWon() {
-	return board.blob[board.exit.x+board.exit.y*board.size.x];
+	return board === null || board.blob[board.exit.x+board.exit.y*board.size.x];
 }
 
 
@@ -865,8 +891,10 @@ function setup() {
 		mouse.x = Math.floor( (evt.clientX - rect.left) / rect.width * ctx.width );
 		mouse.y = Math.floor( (evt.clientY - rect.bottom) / -rect.height * ctx.height );
 
-		mouse.tx = Math.floor((mouse.x - board.offset.x) / TILE_SIZE);
-		mouse.ty = Math.floor((mouse.y - board.offset.y) / TILE_SIZE);
+		if (board !== null) {
+			mouse.tx = Math.floor((mouse.x - board.offset.x) / TILE_SIZE);
+			mouse.ty = Math.floor((mouse.y - board.offset.y) / TILE_SIZE);
+		}
 
 		function inRect(x,y,w,h) {
 			return (mouse.x >= x && mouse.x < x+w && mouse.y >= y && mouse.y < y+h);
