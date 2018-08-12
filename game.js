@@ -18,13 +18,14 @@ const SPRITES = {
 	reset:{x:61, y:271, width:36, height:8},
 	next:{x:61, y:251, width:31, height:8},
 	title:{x:1, y:1, width:120, height:90},
+	end:{x:74, y:94, width:120, height:90},
 };
 
 const TILES = {
 	//blob edges indexed by filled quadrant:
 	//4 8
 	//1 2
-	blobEdges:[],
+	blobEdges:[],blobSick:[],blobDead:[],
 	blobGrow:{E:null, N:null, W:null, S:null},
 	//wall sides/tops indexed by adjacent walls:
 	//.2.
@@ -42,6 +43,8 @@ const TILES = {
 	//logic stuff:
 	logicOutOff:{E:null, N:null, W:null, S:null},
 	logicOutOn:{E:null, N:null, W:null, S:null},
+	person:{x:50, y:0},
+	poison:{x:50, y:30},
 };
 
 (function fill_TILES() {
@@ -72,6 +75,11 @@ const TILES = {
 			TILES.blobEdges[bits] = {x:5 + TILE_SIZE*x, y: 5 + TILE_SIZE*y};
 		}
 	}
+
+	TILES.blobEdges.forEach(function(e){
+		TILES.blobSick.push({x:e.x-5, y:e.y+95});
+		TILES.blobDead.push({x:e.x-5, y:e.y+55});
+	});
 
 	TILES.blobGrow.N = {x:0*TILE_SIZE, y:5*TILE_SIZE};
 	TILES.blobGrow.E = {x:1*TILE_SIZE, y:5*TILE_SIZE};
@@ -132,13 +140,17 @@ let mouse = { x:NaN, y:NaN };
 
 let board = {
 	size:{x:5, y:5},
+	exit:{x:0, y:0},
+	start:{x:0, y:0},
 	walls:[ ],
-	blob:[ ],
+	blob:[ ], //<-- bits: 1=exists, 2=connected, 4=poisoned
 	wires:[ ],
 	signals:[ ],
 	logic:[ ],
 	buttons:[ ],
-	doors:[ ]
+	doors:[ ],
+	people:[], //<-- list of {x:,y:}
+	poison:[] //<-- list of {x:,y:}
 };
 
 let picture = null;
@@ -166,6 +178,8 @@ function makeBoard(map,layers,library) {
 	if (typeof(layers) === 'undefined') layers = 1;
 	if (typeof(library) === 'undefined') library = {};
 	let size = {x:map[0].length, y:map.length/layers};
+	let exit = {};
+	let start = {};
 	let walls = [];
 	let blob = [];
 	let wires = [];
@@ -173,7 +187,8 @@ function makeBoard(map,layers,library) {
 	let logic = [];
 	let buttons = [];
 	let doors = [];
-	let exit = {};
+	let people = [];
+	let poison = [];
 
 	for (let i = 0; i < size.x * size.y; ++i) {
 		walls.push(0);
@@ -195,10 +210,20 @@ function makeBoard(map,layers,library) {
 				if (c === '#') walls[size.x*y+x] = 1;
 				if (c === '=') doors[size.x*y+x] = 1;
 				if (c === 'n') buttons[size.x*y+x] = 1;
-				if (c === 'B') blob[size.x*y+x] = 1;
-				if (c === '+') wires[size.x*y+x] = 0x80; //temporary 'hey, wires here' bit
+				if (c === 'B') {
+					blob[size.x*y+x] = 1;
+					if (!('x' in start) || x === 0 || y === 0 || x+1 == size.x || y+1 === size.y) {
+						start = {x:x, y:y};
+					}
+				}
+				if (c === 'A') people.push({x:x, y:y});
+				if (c === 'x') poison.push({x:x, y:y});
+				if (c === '+') wires[size.x*y+x] |= 0x80; //temporary 'hey, wires here' bit
 				if (c === 'E') exit = {x:x, y:y};
-				if (c in library) logic[size.x*y+x] = library[c];
+				if (c in library) {
+					logic[size.x*y+x] = library[c];
+					wires[size.x*y+x] |= 0x80;
+				}
 			}
 		}
 	}
@@ -237,6 +262,8 @@ function makeBoard(map,layers,library) {
 
 	return {
 		size:size,
+		start:start,
+		exit:exit,
 		walls:walls,
 		blob:blob,
 		wires:wires,
@@ -244,13 +271,27 @@ function makeBoard(map,layers,library) {
 		logic:logic,
 		buttons:buttons,
 		doors:doors,
-		exit:exit
+		people:people,
+		poison:poison
 	};
 }
 
 function cloneBoard(b) {
+	function cloneObjArray(arr) {
+		let ret = [];
+		arr.forEach(function(obj){
+			let clone = {};
+			for (var name in obj) {
+				clone[name] = obj[name];
+			}
+			ret.push(clone);
+		});
+		return ret;
+	}
 	return {
 		size:{x:b.size.x, y:b.size.y},
+		start:{x:b.start.x, y:b.start.y},
+		exit:{x:b.exit.x, y:b.exit.y},
 		walls:b.walls.slice(),
 		blob:b.blob.slice(),
 		wires:b.wires.slice(),
@@ -258,7 +299,8 @@ function cloneBoard(b) {
 		logic:b.logic.slice(),
 		buttons:b.buttons.slice(),
 		doors:b.doors.slice(),
-		exit:{x:b.exit.x, y:b.exit.y}
+		people:cloneObjArray(b.people),
+		poison:cloneObjArray(b.poison),
 	};
 }
 
@@ -297,6 +339,15 @@ const LEVELS = [
 		"#......#",
 		"########"
 	]},
+	{title:"watch out for poison",
+	board:[
+		"###E#",
+		"#...#",
+		"#.#x#",
+		"#.#.#",
+		"#..B#",
+		"###B#"
+	]},
 	{title:"buttons can be useful",
 	board:[
 		"######","......",
@@ -308,28 +359,50 @@ const LEVELS = [
 	],layers:2},
 	{title:"buttons can be harmful",
 	board:[
-		"########","........",
-		"#......#","........",
-		"#.####.#","........",
-		"E=+<+nBB","........",
-		"########","........",
-	],layers:2,library:{'<':0x11}},
-	{title:"button",
+		"########",
+		"#......#",
+		"#.####.#",
+		"E=+n>=BB",
+		"########",
+	],layers:1,library:{'>':0x44}},
+	{title:"people run",
 	board:[
-	"#=###",
-	"#++.#",
-	"#.n.#",
-	"#.++#",
-	"###B#"
+		"#######",
+		"BB..###",
+		"#.#.#.E",
+		"#..A..#",
+		"###.###",
+		"#######"
 	]},
-	{title:"test",
+	{title:"people push buttons",
 	board:[
-	"#=###",".E...",
-	"#++.#",".....",
-	"#.n.#",".....",
-	"#.++#",".....",
-	"###B#","....."
-	],layers:2},
+		"##B####",
+		"#....=E",
+		"#.#.#+#",
+		"#.A.xn#",
+		"#######"
+	],layers:1,library:{'^':0x88}},
+	{title:"false choice",
+	board:[
+		"####B####", ".........",
+		"#...=+..#", ".........",
+		"#....^..#", ".........",
+		"#.n+A+n.#", "....+....",
+		"#.#####.#", ".........",
+		"#.......#", ".........",
+		"####E####", "........."
+	],layers:2,library:{'^':0x88}},
+	{title:"sacrifice",
+	board:[
+		"#########",
+		"#.......#",
+		"#######.#",
+		"E..x.>=BB",
+		"#####n###",
+		"#########",
+	],library:{'>':0x88}},
+	{picture:SPRITES.end
+	},
 ];
 
 LEVELS.forEach(function(level){
@@ -341,6 +414,7 @@ LEVELS.forEach(function(level){
 function setBoard(newBoard) {
 	board = cloneBoard(newBoard);
 	computeSignals();
+	markBlob();
 	undoStack = [];
 }
 
@@ -348,6 +422,9 @@ let maxLevel = 0;
 let currentLevel;
 
 function setLevel(idx) {
+	if (currentLevel !== idx) {
+		if (history && history.replaceState) history.replaceState({},"","?" + idx);
+	}
 	currentLevel = idx;
 	maxLevel = Math.max(maxLevel, currentLevel);
 	if (LEVELS[currentLevel].picture) {
@@ -379,7 +456,7 @@ function draw() {
 	if (board) {
 		board.offset = {
 			x:Math.floor((ctx.width - board.size.x*TILE_SIZE)/2),
-			y:Math.floor((ctx.height - board.size.y*TILE_SIZE)/2)
+			y:Math.floor((ctx.height - 10 - board.size.y*TILE_SIZE + 10)/2)
 		};
 
 		if (mouse.x === mouse.x) {
@@ -396,7 +473,7 @@ function draw() {
 	}
 
 	if (picture) {
-		drawSprite(0,ctx.height-picture.height, picture);
+		drawSprite(0,Math.floor((ctx.height-picture.height)/2), picture);
 	} else {
 
 	ctx.setTransform(1,0, 0,-1, board.offset.x,canvas.height-board.offset.y);
@@ -405,6 +482,13 @@ function draw() {
 		ctx.save();
 		ctx.setTransform(1,0, 0,1, x+board.offset.x, ctx.height-y-TILE_SIZE-board.offset.y);
 		ctx.drawImage(TILES_IMG, tile.x, TILES_IMG.height-tile.y-TILE_SIZE, TILE_SIZE,TILE_SIZE, 0, 0,TILE_SIZE,TILE_SIZE);
+		ctx.restore();
+	}
+
+	function drawQuarterTile(x,y,ox,oy,tile) {
+		ctx.save();
+		ctx.setTransform(1,0, 0,1, (x+ox)+board.offset.x, ctx.height-(y+oy)-TILE_SIZE/2-board.offset.y);
+		ctx.drawImage(TILES_IMG, tile.x+ox, TILES_IMG.height-(tile.y+oy)-TILE_SIZE/2, TILE_SIZE/2,TILE_SIZE/2, 0, 0,TILE_SIZE/2,TILE_SIZE/2);
 		ctx.restore();
 	}
 
@@ -445,7 +529,7 @@ function draw() {
 					}
 				}
 				if (board.logic[x+y*board.size.x] & 0x2) {
-					if (board.signals[x+y*board.size.x] & 0x1) ctx.fillStyle = "#fff";
+					if (board.signals[x+y*board.size.x] & 0x2) ctx.fillStyle = "#fff";
 					else ctx.fillStyle = "#6b6b6b";
 					if (board.logic[x+y*board.size.x] & 0x20) {
 						ctx.fillRect(x*TILE_SIZE+TILE_SIZE/2-2,y*TILE_SIZE+TILE_SIZE/2+3,4,1);
@@ -461,7 +545,7 @@ function draw() {
 					}
 				}
 				if (board.logic[x+y*board.size.x] & 0x4) {
-					if (board.signals[x+y*board.size.x] & 0x1) ctx.fillStyle = "#fff";
+					if (board.signals[x+y*board.size.x] & 0x4) ctx.fillStyle = "#fff";
 					else ctx.fillStyle = "#6b6b6b";
 					if (board.logic[x+y*board.size.x] & 0x40) {
 						ctx.fillRect(x*TILE_SIZE+TILE_SIZE/2-4,y*TILE_SIZE+TILE_SIZE/2-2,1,4);
@@ -477,7 +561,7 @@ function draw() {
 					}
 				}
 				if (board.logic[x+y*board.size.x] & 0x8) {
-					if (board.signals[x+y*board.size.x] & 0x1) ctx.fillStyle = "#fff";
+					if (board.signals[x+y*board.size.x] & 0x8) ctx.fillStyle = "#fff";
 					else ctx.fillStyle = "#6b6b6b";
 					if (board.logic[x+y*board.size.x] & 0x80) {
 						ctx.fillRect(x*TILE_SIZE+TILE_SIZE/2-2,y*TILE_SIZE+TILE_SIZE/2-4,4,1);
@@ -556,18 +640,60 @@ function draw() {
 		}
 	}
 
+	//draw poison:
+	board.poison.forEach(function(p){
+		drawTile(TILE_SIZE*p.x, TILE_SIZE*p.y, TILES.poison);
+	});
+
+	//draw people:
+	board.people.forEach(function(p){
+		drawTile(TILE_SIZE*p.x, TILE_SIZE*p.y, TILES.person);
+	});
+
+
 	//draw blob:
 
 	//note: blob uses corner tiles
 	for (let y = 0; y <= board.size.y; ++y) {
 		for (let x = 0; x <= board.size.x; ++x) {
-			let bits = 0;
-			if (x > 0 && y > 0 && board.blob[(y-1)*board.size.x+(x-1)]) bits |= 1;
-			if (x < board.size.x && y > 0 && board.blob[(y-1)*board.size.x+x]) bits |= 2;
-			if (x > 0 && y < board.size.y && board.blob[y*board.size.x+(x-1)]) bits |= 4;
-			if (x < board.size.x && y < board.size.y && board.blob[y*board.size.x+x]) bits |= 8;
+			function getStyle(x,y) {
+				if (x >= 0 && y >= 0 && x < board.size.x && y < board.size.y) {
+					let b = board.blob[y*board.size.x+x];
+					if ((b & 1)) {
+						if (b & 4) return 4;
+						else if (b & 2) return 2;
+						else return 1;
+					} else {
+						return 0;
+					}
+				} else {
+					return 0;
+				}
+			}
+			let style = [
+				getStyle(x-1,y-1),
+				getStyle(x,y-1),
+				getStyle(x-1,y),
+				getStyle(x,y)
+			];
+			let bits = (style[0] ? 1 : 0) | (style[1] ? 2 : 0) | (style[2] ? 4 : 0) | (style[3] ? 8 : 0);
+
+			if (style[0] === 0) style[0] = Math.max(style[1], style[2]);
+			if (style[3] === 0) style[3] = Math.max(style[1], style[2]);
+			if (style[1] === 0) style[1] = Math.max(style[0], style[3]);
+			if (style[2] === 0) style[2] = Math.max(style[0], style[3]);
+
 			if (bits) {
-				drawTile(TILE_SIZE*x-TILE_SIZE/2, TILE_SIZE*y-TILE_SIZE/2, TILES.blobEdges[bits]);
+				function styleTile(n) {
+					if (style[n] === 4) return TILES.blobSick[bits];
+					else if (style[n] === 2) return TILES.blobEdges[bits];
+					else return TILES.blobDead[bits];
+				}
+				//drawTile(TILE_SIZE*x-TILE_SIZE/2, TILE_SIZE*y-TILE_SIZE/2, styleTile(0));
+				drawQuarterTile(TILE_SIZE*x-TILE_SIZE/2, TILE_SIZE*y-TILE_SIZE/2, 0,0, styleTile(0));
+				drawQuarterTile(TILE_SIZE*x-TILE_SIZE/2, TILE_SIZE*y-TILE_SIZE/2, TILE_SIZE/2,0, styleTile(1));
+				drawQuarterTile(TILE_SIZE*x-TILE_SIZE/2, TILE_SIZE*y-TILE_SIZE/2, 0,TILE_SIZE/2, styleTile(2));
+				drawQuarterTile(TILE_SIZE*x-TILE_SIZE/2, TILE_SIZE*y-TILE_SIZE/2, TILE_SIZE/2,TILE_SIZE/2, styleTile(3));
 			}
 			//if (board.blob[y*board.size.x+x]) {
 			//	ctx.fillStyle = '#1b1';
@@ -642,10 +768,11 @@ function draw() {
 	}
 
 	if (isWon()) {
+		let y = (picture ? 1 : 10);
 		if (mouse.overNext) {
-			ctx.fillRect(Math.floor((ctx.width-SPRITES.next.width)/2), 10, SPRITES.next.width, SPRITES.next.height);
+			ctx.fillRect(Math.floor((ctx.width-SPRITES.next.width)/2), y, SPRITES.next.width, SPRITES.next.height);
 		}
-		drawSprite(Math.floor((ctx.width-SPRITES.next.width)/2), 10, SPRITES.next);
+		drawSprite(Math.floor((ctx.width-SPRITES.next.width)/2), y, SPRITES.next);
 	}
 
 	if (board) {
@@ -680,9 +807,19 @@ function update(elapsed) {
 	//NOTE: should probably compute whether drawing is needed to save cpu.
 }
 
-function isBlob(tx, ty) {
+function isBlob(tx, ty, connected) {
 	if (tx < 0 || tx >= board.size.x || ty < 0 || ty >= board.size.y) return false;
-	return board.blob[tx+ty*board.size.x] !== 0;
+	if (connected) {
+		return (board.blob[tx+ty*board.size.x] & 2) && !(board.blob[tx+ty*board.size.x] & 4);
+	} else {
+		return board.blob[tx+ty*board.size.x] & 1;
+	}
+}
+
+function isPerson(tx, ty) {
+	return board.people.some(function(p){
+		return p.x === tx && p.y === ty;
+	});
 }
 
 function isWall(tx, ty) {
@@ -698,7 +835,70 @@ function isSolid(tx, ty) {
 }
 
 function isWon() {
-	return board === null || board.blob[board.exit.x+board.exit.y*board.size.x];
+	return currentLevel + 1 < LEVELS.length && (board === null || board.blob[board.exit.x+board.exit.y*board.size.x]);
+}
+
+function markBlob() {
+	//mark whole blob as disconnected:
+	for (let y = 0; y < board.size.y; ++y) {
+		for (let x = 0; x < board.size.x; ++x) {
+			board.blob[y*board.size.x+x] &= ~2; //mark everything disconnected
+		}
+	}
+	if (board.blob[board.start.y*board.size.x+board.start.x] & 1) {
+		board.blob[board.start.y*board.size.x+board.start.x] |= 2; //mark start as connected
+		let todo = [board.start];
+		while (todo.length) {
+			let at = todo.pop();
+			[{x:-1,y:0},{x:1,y:0},{x:0,y:-1},{x:0,y:1}].forEach(function(step){
+				let n = {x:at.x+step.x, y:at.y+step.y};
+				if (board.blob[n.y*board.size.x+n.x] & 1) {
+					if (!(board.blob[n.y*board.size.x+n.x] & 2)) {
+						board.blob[n.y*board.size.x+n.x] |= 2;
+						todo.push(n);
+					}
+				}
+			});
+		}
+	}
+}
+
+function spreadSickness() {
+	let sick = [];
+	for (let y = 0; y < board.size.y; ++y) {
+		for (let x = 0; x < board.size.x; ++x) {
+			if (board.blob[y*board.size.x+x] & 4) {
+				sick.push({x:x,y:y});
+			}
+		}
+	}
+	//neighbors to sick blob get sick:
+	sick.forEach(function(s){
+		[{x:-1,y:0},{x:1,y:0},{x:0,y:-1},{x:0,y:1}].forEach(function(ofs){
+			let n = {x:s.x+ofs.x, y:s.y+ofs.y};
+			if (n.x >= 0 && n.y >= 0 && n.x < board.size.x && n.y < board.size.y) {
+				if (board.blob[n.y*board.size.x+n.x] & 1) {
+					board.blob[n.y*board.size.x+n.x] |= 4;
+				}
+			}
+		});
+	});
+
+	//blob on poison gets sick:
+	let remain = [];
+	board.poison.forEach(function(p){
+		if (board.blob[p.y*board.size.x+p.x] & 1) {
+			board.blob[p.y*board.size.x+p.x] |= 4;
+		} else {
+			remain.push(p);
+		}
+	});
+	board.poison = remain;
+
+	//sick blobs die:
+	sick.forEach(function(s){
+		board.blob[s.y*board.size.x+s.x] = 0;
+	});
 }
 
 
@@ -761,7 +961,8 @@ function computeSignals() {
 						outs.push(nets[x+y*board.size.x][side]);
 					}
 				});
-				let pushed = (board.buttons[x+y*board.size.x] > 1);
+				let pushed = isBlob(x,y) || isPerson(x,y);
+				board.buttons[x+y*board.size.x] = (pushed ? 2 : 1);
 				components.push({
 					x:x, y:y,
 					ins:[],
@@ -853,17 +1054,19 @@ function computeSignals() {
 function canGrowTo(tx, ty) {
 	if (isBlob(tx,ty)) return null; //can't grow where there is already blob
 	if (isSolid(tx,ty)) return null; //can't grow into wall
-	if (isBlob(tx-1,ty)) return 'E';
-	if (isBlob(tx+1,ty)) return 'W';
-	if (isBlob(tx,ty+1)) return 'S';
-	if (isBlob(tx,ty-1)) return 'N';
+	if (isPerson(tx,ty)) return null; //can't grow into people
+	if (isBlob(tx-1,ty,true)) return 'E';
+	if (isBlob(tx+1,ty,true)) return 'W';
+	if (isBlob(tx,ty+1,true)) return 'S';
+	if (isBlob(tx,ty-1,true)) return 'N';
 	return null;
 }
 
 function growTo(tx, ty) {
 	if (isBlob(tx,ty)) return; //can't grow where there is already blob
 	if (isSolid(tx,ty)) return; //can't grow into wall
-	if (!(isBlob(tx-1,ty) || isBlob(tx+1,ty) || isBlob(tx,ty-1) || isBlob(tx,ty+1))) return; //can't grow if not adjacent to blob
+	if (isPerson(tx,ty)) return; //can't grow into person
+	if (!(isBlob(tx-1,ty,true) || isBlob(tx+1,ty,true) || isBlob(tx,ty-1,true) || isBlob(tx,ty+1,true))) return; //can't grow if not adjacent to blob
 
 	undoStack.push(board);
 	board = cloneBoard(board);
@@ -871,11 +1074,43 @@ function growTo(tx, ty) {
 	//actually grow:
 	board.blob[tx+ty*board.size.x] = 1;
 
-	//mark button pressed:
-	if (board.buttons[tx+ty*board.size.x]) {
-		board.buttons[tx+ty*board.size.x] = 2;
-		computeSignals();
-	}
+
+	//move people:
+	board.people.forEach(function(p){
+		//look for nearest blob:
+		let dis = Infinity;
+		let dir = {x:0, y:0};
+
+		[{x:1,y:0},{x:-1,y:0},{x:0,y:1},{x:0,y:-1}].forEach(function(step){
+			let s = 0;
+			if (isSolid(p.x-step.x,p.y-step.y) || isBlob(p.x-step.x,p.y-step.y)) return;
+			while (!isSolid(p.x+s*step.x, p.y+s*step.y) && !isBlob(p.x+s*step.x, p.y+s*step.y)) ++s;
+			if (isBlob(p.x+s*step.x, p.y+s*step.y)) {
+				if (s < dis) {
+					dis = s;
+					dir = {x:-step.x, y:-step.y};
+				}
+			}
+		});
+		if (dis !== Infinity) {
+			if (!isPerson(p.x+dir.x, p.y+dir.y) && !isSolid(p.x+dir.x, p.y+dir.y) && !isBlob(p.x+dir.x,p.y+dir.y)) {
+				p.x += dir.x;
+				p.y += dir.y;
+			}
+		}
+	});
+
+	//update signals:
+	computeSignals();
+
+	//kill blob as needed:
+	spreadSickness();
+
+	//update blob markings:
+	markBlob();
+
+	//and, of course, update signals (in case blob died off of a button):
+	computeSignals();
 }
 
 function setup() {
@@ -902,7 +1137,8 @@ function setup() {
 
 		mouse.overReset = inRect(1,1,SPRITES.reset.width,SPRITES.reset.height);
 		mouse.overUndo = inRect(ctx.width-1-SPRITES.undo.width,1,SPRITES.undo.width,SPRITES.undo.height);
-		mouse.overNext = inRect(Math.floor((ctx.width-SPRITES.next.width)/2),10,SPRITES.next.width, SPRITES.next.height);
+		let y = (picture ? 1 : 10);
+		mouse.overNext = inRect(Math.floor((ctx.width-SPRITES.next.width)/2),y,SPRITES.next.width, SPRITES.next.height);
 	}
 
 	function handleDown() {
