@@ -11,6 +11,24 @@ TILES_IMG.onload = function(){
 };
 TILES_IMG.src = "tiles.png";
 
+const AUDIO = {
+	click:"click.wav",
+	move:"grund.wav",
+	winLevel:"fin.wav",
+	winGame:"end.wav"
+};
+(function loadAudio(){
+	for (let n in AUDIO) {
+		let a = new Audio();
+		a.src = AUDIO[n];
+		AUDIO[n] = a;
+		a.oneshot = function() {
+			this.pause();
+			this.currentTime = 0;
+			this.play();
+		};
+	}
+})();
 
 //n.b. coordinates are in 0,0-is-upper-left system, unlike TILES:
 const SPRITES = {
@@ -43,7 +61,7 @@ const TILES = {
 	//logic stuff:
 	logicOutOff:{E:null, N:null, W:null, S:null},
 	logicOutOn:{E:null, N:null, W:null, S:null},
-	person:{x:50, y:0},
+	person:{x:50, y:10},
 	poison:{x:50, y:30},
 };
 
@@ -154,6 +172,7 @@ let board = {
 };
 
 let picture = null;
+let isEnd = false;
 
 let undoStack = [];
 
@@ -305,6 +324,7 @@ function cloneBoard(b) {
 }
 
 function undo() {
+	AUDIO.click.oneshot();
 	if (board) {
 		if (undoStack.length) {
 			board = undoStack.pop();
@@ -313,6 +333,10 @@ function undo() {
 }
 
 function reset() {
+	AUDIO.click.oneshot();
+	if (isEnd) {
+		setLevel(0);
+	}
 	if (board) {
 		if (undoStack.length) {
 			undoStack.push(board);
@@ -401,7 +425,7 @@ const LEVELS = [
 		"#####n###",
 		"#########",
 	],library:{'>':0x88}},
-	{picture:SPRITES.end
+	{picture:SPRITES.end,isEnd:true
 	},
 ];
 
@@ -430,9 +454,11 @@ function setLevel(idx) {
 	if (LEVELS[currentLevel].picture) {
 		picture = LEVELS[currentLevel].picture;
 		board = null;
+		isEnd = (LEVELS[currentLevel].isEnd ? true : false);
 	} else {
 		picture = null;
 		setBoard(LEVELS[currentLevel].board);
+		isEnd = false;
 	}
 }
 
@@ -443,7 +469,14 @@ if (document.location.search.match(/^\?\d+/)) {
 }
 
 function next() {
-	if (isWon()) setLevel(currentLevel + 1);
+	if (isWon()) {
+		setLevel(currentLevel + 1);
+		if (currentLevel + 1 === LEVELS.length) {
+			AUDIO.winGame.oneshot();
+		} else {
+			AUDIO.click.oneshot();
+		}
+	}
 }
 
 function draw() {
@@ -755,13 +788,15 @@ function draw() {
 		}
 	}
 
-	} //end if(picture) else 
+	} //end if(picture) else
+
+	let resetX = isEnd ? Math.floor((ctx.width - SPRITES.reset.width) / 2) : 1;
 
 	ctx.setTransform(1,0, 0,-1, 0,canvas.height);
 
 	ctx.fillStyle = '#444';
-	if (mouse.overReset && board) {
-		ctx.fillRect(1,1,SPRITES.reset.width, SPRITES.reset.height);
+	if (mouse.overReset) {
+		ctx.fillRect(resetX,1,SPRITES.reset.width, SPRITES.reset.height);
 	}
 	if (mouse.overUndo && board) {
 		ctx.fillRect(ctx.width-1-SPRITES.undo.width,1,SPRITES.undo.width, SPRITES.undo.height);
@@ -775,8 +810,11 @@ function draw() {
 		drawSprite(Math.floor((ctx.width-SPRITES.next.width)/2), y, SPRITES.next);
 	}
 
+	if (board || isEnd) {
+		drawSprite(resetX,1, SPRITES.reset);
+	}
+
 	if (board) {
-		drawSprite(1,1, SPRITES.reset);
 		drawSprite(ctx.width-1-SPRITES.undo.width,1, SPRITES.undo);
 	}
 
@@ -1068,6 +1106,8 @@ function growTo(tx, ty) {
 	if (isPerson(tx,ty)) return; //can't grow into person
 	if (!(isBlob(tx-1,ty,true) || isBlob(tx+1,ty,true) || isBlob(tx,ty-1,true) || isBlob(tx,ty+1,true))) return; //can't grow if not adjacent to blob
 
+	let wasWon = isWon();
+
 	undoStack.push(board);
 	board = cloneBoard(board);
 
@@ -1078,24 +1118,47 @@ function growTo(tx, ty) {
 	//move people:
 	board.people.forEach(function(p){
 		//look for nearest blob:
-		let dis = Infinity;
-		let dir = {x:0, y:0};
 
-		[{x:1,y:0},{x:-1,y:0},{x:0,y:1},{x:0,y:-1}].forEach(function(step){
+		function dis(sx,sy) {
 			let s = 0;
-			if (isSolid(p.x-step.x,p.y-step.y) || isBlob(p.x-step.x,p.y-step.y)) return;
-			while (!isSolid(p.x+s*step.x, p.y+s*step.y) && !isBlob(p.x+s*step.x, p.y+s*step.y)) ++s;
-			if (isBlob(p.x+s*step.x, p.y+s*step.y)) {
-				if (s < dis) {
-					dis = s;
-					dir = {x:-step.x, y:-step.y};
-				}
+			while (!isSolid(p.x+s*sx, p.y+s*sy) && !isBlob(p.x+s*sx, p.y+s*sy)) ++s;
+			if (isBlob(p.x+s*sx, p.y+s*sy)) return s;
+			else return Infinity;
+		}
+
+		let E = dis(1,0);
+		let W = dis(-1,0);
+		let N = dis(0,1);
+		let S = dis(0,-1);
+
+		let step = null;
+
+		function tryEW() {
+			if (E < W) {
+				if (!isSolid(p.x-1,p.y) && !isBlob(p.x-1,p.y)) step = {x:-1, y:0};
+			} else if (W < E) {
+				if (!isSolid(p.x+1,p.y) && !isBlob(p.x+1,p.y)) step = {x:1, y:0};
 			}
-		});
-		if (dis !== Infinity) {
-			if (!isPerson(p.x+dir.x, p.y+dir.y) && !isSolid(p.x+dir.x, p.y+dir.y) && !isBlob(p.x+dir.x,p.y+dir.y)) {
-				p.x += dir.x;
-				p.y += dir.y;
+		}
+		function tryNS() {
+			if (N < S) {
+				if (!isSolid(p.x,p.y-1) && !isBlob(p.x,p.y-1)) step = {x:0, y:-1};
+			} else if (S < N) {
+				if (!isSolid(p.x,p.y+1) && !isBlob(p.x,p.y+1)) step = {x:0, y:1};
+			}
+		}
+
+		if (Math.min(E,W) < Math.min(N,S)) {
+			tryEW();
+			if (!step) tryNS();
+		} else {
+			tryNS();
+			if (!step) tryEW();
+		}
+		if (step) {
+			if (!isPerson(p.x+step.x, p.y+step.y)) {
+				p.x += step.x;
+				p.y += step.y;
 			}
 		}
 	});
@@ -1111,6 +1174,13 @@ function growTo(tx, ty) {
 
 	//and, of course, update signals (in case blob died off of a button):
 	computeSignals();
+
+
+	if (isWon() && !wasWon) {
+		AUDIO.winLevel.oneshot();
+	} else {
+		AUDIO.move.oneshot();
+	}
 }
 
 function setup() {
@@ -1135,10 +1205,12 @@ function setup() {
 			return (mouse.x >= x && mouse.x < x+w && mouse.y >= y && mouse.y < y+h);
 		}
 
-		mouse.overReset = inRect(1,1,SPRITES.reset.width,SPRITES.reset.height);
-		mouse.overUndo = inRect(ctx.width-1-SPRITES.undo.width,1,SPRITES.undo.width,SPRITES.undo.height);
+		let resetX = isEnd ? Math.floor((ctx.width - SPRITES.reset.width) / 2) : 1;
+		mouse.overReset = (board || isEnd ? inRect(resetX,1,SPRITES.reset.width,SPRITES.reset.height) : false);
+		mouse.overUndo = (board ? inRect(ctx.width-1-SPRITES.undo.width,1,SPRITES.undo.width,SPRITES.undo.height) : false);
+
 		let y = (picture ? 1 : 10);
-		mouse.overNext = inRect(Math.floor((ctx.width-SPRITES.next.width)/2),y,SPRITES.next.width, SPRITES.next.height);
+		mouse.overNext = (isWon() ? inRect(Math.floor((ctx.width-SPRITES.next.width)/2),y,SPRITES.next.width, SPRITES.next.height) : false);
 	}
 
 	function handleDown() {
@@ -1148,6 +1220,8 @@ function setup() {
 			undo();
 		} else if (mouse.overNext) {
 			next();
+		} else if (picture) {
+			return;
 		} else if (mouse.tx >= 0 && mouse.tx < board.size.x && mouse.ty >= 0 && mouse.ty < board.size.y) {
 			//check if it's okay to grow to the given tile:
 			growTo(mouse.tx, mouse.ty);
