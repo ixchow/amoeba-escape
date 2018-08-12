@@ -11,18 +11,36 @@ TILES_IMG.onload = function(){
 };
 TILES_IMG.src = "tiles.png";
 
+
+//n.b. coordinates are in 0,0-is-upper-left system, unlike TILES:
+const SPRITES = {
+	undo:{x:61, y:261, width:31, height:8},
+	reset:{x:61, y:271, width:36, height:8},
+	next:{x:61, y:251, width:31, height:8},
+};
+
 const TILES = {
 	//blob edges indexed by filled quadrant:
 	//4 8
 	//1 2
 	blobEdges:[],
+	blobGrow:{E:null, N:null, W:null, S:null},
 	//wall sides/tops indexed by adjacent walls:
 	//.2.
 	//4 1
 	//.8.
 	wallSides:[],
-	doorUp:null,
-	doorDown:null
+	//border fade-out:
+	border:{E:null, NE:null, N:null, NW:null, W:null, SW:null, S:null, SE:null},
+	//exit arrows:
+	exit:{E:null, N:null, W:null, S:null},
+	//doors:
+	doorUp:null, doorDown:null,
+	//buttons:
+	buttonUp:null,buttonDown:null,
+	//logic stuff:
+	logicOutOff:{E:null, N:null, W:null, S:null},
+	logicOutOn:{E:null, N:null, W:null, S:null},
 };
 
 (function fill_TILES() {
@@ -53,6 +71,11 @@ const TILES = {
 			TILES.blobEdges[bits] = {x:5 + TILE_SIZE*x, y: 5 + TILE_SIZE*y};
 		}
 	}
+
+	TILES.blobGrow.N = {x:0*TILE_SIZE, y:5*TILE_SIZE};
+	TILES.blobGrow.E = {x:1*TILE_SIZE, y:5*TILE_SIZE};
+	TILES.blobGrow.S = {x:2*TILE_SIZE, y:5*TILE_SIZE};
+	TILES.blobGrow.W = {x:3*TILE_SIZE, y:5*TILE_SIZE};
 	//wall tiles are stored in a basic 4-edge order
 	//bits:
 	//.2.
@@ -76,62 +99,49 @@ const TILES = {
 	}
 	TILES.doorDown = {x:100, y:0};
 	TILES.doorUp = {x:110, y:0};
+	TILES.buttonDown = {x:100, y:10};
+	TILES.buttonUp = {x:110, y:10};
+
+	TILES.border.SW = {x:120 + TILE_SIZE*0, y:0 + TILE_SIZE*0};
+	TILES.border.S  = {x:120 + TILE_SIZE*1, y:0 + TILE_SIZE*0};
+	TILES.border.SE = {x:120 + TILE_SIZE*2, y:0 + TILE_SIZE*0};
+	TILES.border.W  = {x:120 + TILE_SIZE*0, y:0 + TILE_SIZE*1};
+	TILES.border.E  = {x:120 + TILE_SIZE*2, y:0 + TILE_SIZE*1};
+	TILES.border.NW = {x:120 + TILE_SIZE*0, y:0 + TILE_SIZE*2};
+	TILES.border.N  = {x:120 + TILE_SIZE*1, y:0 + TILE_SIZE*2};
+	TILES.border.NE = {x:120 + TILE_SIZE*2, y:0 + TILE_SIZE*2};
+
+	TILES.exit.S  = {x:150 + TILE_SIZE*1, y:0 + TILE_SIZE*0};
+	TILES.exit.W  = {x:150 + TILE_SIZE*0, y:0 + TILE_SIZE*1};
+	TILES.exit.E  = {x:150 + TILE_SIZE*2, y:0 + TILE_SIZE*1};
+	TILES.exit.N  = {x:150 + TILE_SIZE*1, y:0 + TILE_SIZE*2};
+
+	TILES.logicOutOff.W = {x:180, y:TILE_SIZE*0};
+	TILES.logicOutOff.N = {x:180, y:TILE_SIZE*1};
+	TILES.logicOutOff.E = {x:180, y:TILE_SIZE*2};
+	TILES.logicOutOff.S = {x:180, y:TILE_SIZE*3};
+
+	TILES.logicOutOn.W = {x:190, y:TILE_SIZE*0};
+	TILES.logicOutOn.N = {x:190, y:TILE_SIZE*1};
+	TILES.logicOutOn.E = {x:190, y:TILE_SIZE*2};
+	TILES.logicOutOn.S = {x:190, y:TILE_SIZE*3};
 })();
 
 let mouse = { x:NaN, y:NaN };
 
 let board = {
 	size:{x:5, y:5},
-	walls:[
-		1,0,1,1,1,
-		1,0,0,0,1,
-		1,0,0,0,1,
-		1,0,0,0,1,
-		1,1,1,0,1
-	],
-	blob:[
-		0,0,0,0,0,
-		0,0,0,0,0,
-		0,0,0,0,0,
-		0,0,0,0,0,
-		0,0,0,1,0
-	],
-	wires:[
-		0x0,0x2,0x0,0x0,0x0,
-		0x0,0x9,0x7,0x0,0x0,
-		0x0,0xb,0xf,0xe,0x0,
-		0x0,0x0,0xd,0x0,0x0,
-		0x0,0x0,0x0,0x0,0x0,
-	],
-	signals:[
-		0,0,0,0,0,
-		0,0,0,0,0,
-		0,0,0,0,0,
-		0,0,0,0,0,
-		0,0,0,0,0,
-	],
-	logic:[
-		0,8,0,0,0,
-		0,0,0,0,0,
-		0,0,0,0,0,
-		0,0,0,0,0,
-		0,0,0,0,0,
-	],
-	buttons:[
-		0,0,0,0,0,
-		0,0,0,0,0,
-		0,0,1,0,0,
-		0,0,0,0,0,
-		0,0,0,0,0,
-	],
-	doors:[
-		0,1,0,0,0,
-		0,0,0,0,0,
-		0,0,0,0,0,
-		0,0,0,0,0,
-		0,0,0,0,0,
-	]
+	walls:[ ],
+	blob:[ ],
+	wires:[ ],
+	signals:[ ],
+	logic:[ ],
+	buttons:[ ],
+	doors:[ ]
 };
+
+let undoStack = [];
+
 //wires go from center of tile to edge:
 // . 2 .
 // 4   1
@@ -149,22 +159,232 @@ let board = {
 // 40   10
 //  . 80 .
 
+function makeBoard(map,layers,library) {
+	if (typeof(layers) === 'undefined') layers = 1;
+	if (typeof(library) === 'undefined') library = {};
+	let size = {x:map[0].length, y:map.length/layers};
+	let walls = [];
+	let blob = [];
+	let wires = [];
+	let signals = [];
+	let logic = [];
+	let buttons = [];
+	let doors = [];
+	let exit = {};
 
-/*
-board = makeBoard([
-	"#.###",
-	"#...#",
-	"#...#",
-	"#...#",
-	"###.#"
-]);
-*/
+	for (let i = 0; i < size.x * size.y; ++i) {
+		walls.push(0);
+		blob.push(0);
+		wires.push(0);
+		signals.push(0);
+		logic.push(0);
+		buttons.push(0);
+		doors.push(0);
+	}
+
+	let ret = {
+		size:{x:map[0].length, y:map.length},
+	};
+	for (let y = 0; y < size.y; ++y) {
+		for (let x = 0; x < size.x; ++x) {
+			for (let l = 0; l < layers; ++l) {
+				let c = map[(size.y-1-y)*layers+l][x];
+				if (c === '#') walls[size.x*y+x] = 1;
+				if (c === '=') doors[size.x*y+x] = 1;
+				if (c === 'n') buttons[size.x*y+x] = 1;
+				if (c === 'B') blob[size.x*y+x] = 1;
+				if (c === '+') wires[size.x*y+x] = 0x80; //temporary 'hey, wires here' bit
+				if (c === 'E') exit = {x:x, y:y};
+				if (c in library) logic[size.x*y+x] = library[c];
+			}
+		}
+	}
+	function wantsWire(x,y) {
+		if (x < 0 || x >= size.x || y < 0 || y >= size.y) return false;
+		if (logic[size.x*y+x] !== 0) return true;
+		if (buttons[size.x*y+x] !== 0) return true;
+		if (doors[size.x*y+x] !== 0) return true;
+		if (wires[size.x*y+x] & 0x80) return true;
+		return false;
+	}
+	for (let y = 0; y < size.y; ++y) {
+		for (let x = 0; x < size.x; ++x) {
+			for (let l = 0; l < layers; ++l) {
+				if (wires[size.x*y+x] & 0x80) {
+					if (wantsWire(x-1,y)) {
+						wires[size.x*y+x] |= 4;
+						if (x > 0) wires[size.x*y+x-1] |= 1;
+					}
+					if (wantsWire(x,y-1)) {
+						wires[size.x*y+x] |= 8;
+						if (y > 0) wires[size.x*(y-1)+x] |= 2;
+					}
+					if (wantsWire(x+1,y)) {
+						wires[size.x*y+x] |= 1;
+						if (x+1 < size.x) wires[size.x*y+x+1] |= 4;
+					}
+					if (wantsWire(x,y+1)) {
+						wires[size.x*y+x] |= 2;
+						if (y+1 < size.y) wires[size.x*(y+1)+x] |= 8;
+					}
+				}
+			}
+		}
+	}
+
+	return {
+		size:size,
+		walls:walls,
+		blob:blob,
+		wires:wires,
+		signals:signals,
+		logic:logic,
+		buttons:buttons,
+		doors:doors,
+		exit:exit
+	};
+}
+
+function cloneBoard(b) {
+	return {
+		size:{x:b.size.x, y:b.size.y},
+		walls:b.walls.slice(),
+		blob:b.blob.slice(),
+		wires:b.wires.slice(),
+		signals:b.signals.slice(),
+		logic:b.logic.slice(),
+		buttons:b.buttons.slice(),
+		doors:b.doors.slice(),
+		exit:{x:b.exit.x, y:b.exit.y}
+	};
+}
+
+function undo() {
+	if (undoStack.length) {
+		board = undoStack.pop();
+	}
+}
+
+function reset() {
+	if (undoStack.length) {
+		undoStack.push(board);
+		board = cloneBoard(undoStack[0]);
+	}
+}
+
+const LEVELS = [
+	{title:"click to grow",
+	board:[
+		"#######",
+		"#B    E",
+		"#######"
+	]},
+	{title:"grow in any directions",
+	board:[
+		"######E#",
+		"#....#.#",
+		"BB...#.#",
+		"#..###.#",
+		"#......#",
+		"########"
+	]},
+	{title:"buttons can be useful",
+	board:[
+		"######","......",
+		"#.n..#","..+...",
+		"####.#","..+...",
+		"E=+..#","......",
+		"#..B.#","......",
+		"###B##","......",
+	],layers:2},
+	{title:"buttons can be harmful",
+	board:[
+		"########","........",
+		"#......#","........",
+		"#.####.#","........",
+		"E=+<+nBB","........",
+		"########","........",
+	],layers:2,library:{'<':0x11}},
+	{title:"button",
+	board:[
+	"#=###",
+	"#++.#",
+	"#.n.#",
+	"#.++#",
+	"###B#"
+	]},
+	{title:"test",
+	board:[
+	"#=###",".E...",
+	"#++.#",".....",
+	"#.n.#",".....",
+	"#.++#",".....",
+	"###B#","....."
+	],layers:2},
+];
+
+LEVELS.forEach(function(level){
+	console.log(level.title);
+	level.board = makeBoard(level.board, level.layers, level.library);
+});
+
+function setBoard(newBoard) {
+	board = cloneBoard(newBoard);
+	computeSignals();
+	undoStack = [];
+}
+
+let maxLevel = 0;
+let currentLevel;
+
+function setLevel(idx) {
+	currentLevel = idx;
+	maxLevel = Math.max(maxLevel, currentLevel);
+	setBoard(LEVELS[currentLevel].board);
+}
+
+if (document.location.search.match(/^\?\d+/)) {
+	setLevel(parseInt(document.location.search.substr(1)));
+} else {
+	setLevel(0);
+}
+
+function next() {
+	if (isWon()) setLevel(currentLevel + 1);
+}
+
 function draw() {
 	ctx.setTransform(1,0, 0,-1, 0,canvas.height);
 	ctx.globalAlpha = 1.0;
 
-	ctx.fillStyle = '#f0f';
+	ctx.fillStyle = '#000';
 	ctx.fillRect(0,0, ctx.width,ctx.height);
+
+	board.offset = {
+		x:Math.floor((ctx.width - board.size.x*TILE_SIZE)/2),
+		y:Math.floor((ctx.height - board.size.y*TILE_SIZE)/2)
+	};
+
+	if (mouse.x === mouse.x) {
+		mouse.tx = Math.floor((mouse.x - board.offset.x) / TILE_SIZE);
+		mouse.ty = Math.floor((mouse.y - board.offset.y) / TILE_SIZE);
+	}
+
+	function drawSprite(x,y,sprite) {
+		ctx.save();
+		ctx.setTransform(1,0, 0,1, x, ctx.height-y-sprite.height);
+		ctx.drawImage(TILES_IMG, sprite.x, sprite.y, sprite.width, sprite.height, 0, 0, sprite.width, sprite.height);
+		ctx.restore();
+	}
+
+	ctx.setTransform(1,0, 0,-1, board.offset.x,canvas.height-board.offset.y);
+
+	function drawTile(x,y,tile) {
+		ctx.save();
+		ctx.setTransform(1,0, 0,1, x+board.offset.x, ctx.height-y-TILE_SIZE-board.offset.y);
+		ctx.drawImage(TILES_IMG, tile.x, TILES_IMG.height-tile.y-TILE_SIZE, TILE_SIZE,TILE_SIZE, 0, 0,TILE_SIZE,TILE_SIZE);
+		ctx.restore();
+	}
 
 	//draw floor:
 	for (let y = 0; y < board.size.y; ++y) {
@@ -183,39 +403,71 @@ function draw() {
 		for (let x = 0; x < board.size.x; ++x) {
 			if (board.logic[x+y*board.size.x]) {
 				//logic core:
-				if (board.signals[x+y*board.size.x] & 0x1) ctx.fillStyle = "#fff";
+				if (board.signals[x+y*board.size.x] & 0x80) ctx.fillStyle = "#fff";
 				else ctx.fillStyle = "#6b6b6b";
 				ctx.fillRect(x*TILE_SIZE+TILE_SIZE/2-2, y*TILE_SIZE+TILE_SIZE/2-2,4,4);
 				if (board.logic[x+y*board.size.x] & 0x1) {
+					if (board.signals[x+y*board.size.x] & 0x1) ctx.fillStyle = "#fff";
+					else ctx.fillStyle = "#6b6b6b";
 					if (board.logic[x+y*board.size.x] & 0x10) {
 						ctx.fillRect(x*TILE_SIZE+TILE_SIZE/2+3,y*TILE_SIZE+TILE_SIZE/2-2,1,4);
 						ctx.fillRect(x*TILE_SIZE+TILE_SIZE/2+4,y*TILE_SIZE+TILE_SIZE/2-1,TILE_SIZE/2-4,2);
 					} else {
 						ctx.fillRect(x*TILE_SIZE+TILE_SIZE/2+2,y*TILE_SIZE+TILE_SIZE/2-1,TILE_SIZE/2-2,2);
 					}
+				} else if (board.wires[x+y*board.size.x] & 0x1) {
+					if (board.signals[x+y*board.size.x] & 0x1) {
+						drawTile(x*TILE_SIZE, y*TILE_SIZE, TILES.logicOutOn.E);
+					} else {
+						drawTile(x*TILE_SIZE, y*TILE_SIZE, TILES.logicOutOff.E);
+					}
 				}
 				if (board.logic[x+y*board.size.x] & 0x2) {
+					if (board.signals[x+y*board.size.x] & 0x1) ctx.fillStyle = "#fff";
+					else ctx.fillStyle = "#6b6b6b";
 					if (board.logic[x+y*board.size.x] & 0x20) {
 						ctx.fillRect(x*TILE_SIZE+TILE_SIZE/2-2,y*TILE_SIZE+TILE_SIZE/2+3,4,1);
 						ctx.fillRect(x*TILE_SIZE+TILE_SIZE/2-1,y*TILE_SIZE+TILE_SIZE/2+3,2,TILE_SIZE/2-3);
 					} else {
 						ctx.fillRect(x*TILE_SIZE+TILE_SIZE/2-1,y*TILE_SIZE+TILE_SIZE/2+2,2,TILE_SIZE/2-2);
 					}
+				} else if (board.wires[x+y*board.size.x] & 0x2) {
+					if (board.signals[x+y*board.size.x] & 0x2) {
+						drawTile(x*TILE_SIZE, y*TILE_SIZE, TILES.logicOutOn.N);
+					} else {
+						drawTile(x*TILE_SIZE, y*TILE_SIZE, TILES.logicOutOff.N);
+					}
 				}
 				if (board.logic[x+y*board.size.x] & 0x4) {
+					if (board.signals[x+y*board.size.x] & 0x1) ctx.fillStyle = "#fff";
+					else ctx.fillStyle = "#6b6b6b";
 					if (board.logic[x+y*board.size.x] & 0x40) {
 						ctx.fillRect(x*TILE_SIZE+TILE_SIZE/2-4,y*TILE_SIZE+TILE_SIZE/2-2,1,4);
 						ctx.fillRect(x*TILE_SIZE,y*TILE_SIZE+TILE_SIZE/2-1,TILE_SIZE/2-4,2);
 					} else {
 						ctx.fillRect(x*TILE_SIZE,y*TILE_SIZE+TILE_SIZE/2-1,TILE_SIZE/2-2,2);
 					}
+				} else if (board.wires[x+y*board.size.x] & 0x4) {
+					if (board.signals[x+y*board.size.x] & 0x4) {
+						drawTile(x*TILE_SIZE, y*TILE_SIZE, TILES.logicOutOn.W);
+					} else {
+						drawTile(x*TILE_SIZE, y*TILE_SIZE, TILES.logicOutOff.W);
+					}
 				}
 				if (board.logic[x+y*board.size.x] & 0x8) {
+					if (board.signals[x+y*board.size.x] & 0x1) ctx.fillStyle = "#fff";
+					else ctx.fillStyle = "#6b6b6b";
 					if (board.logic[x+y*board.size.x] & 0x80) {
 						ctx.fillRect(x*TILE_SIZE+TILE_SIZE/2-2,y*TILE_SIZE+TILE_SIZE/2-4,4,1);
 						ctx.fillRect(x*TILE_SIZE+TILE_SIZE/2-1,y*TILE_SIZE,2,TILE_SIZE/2-3);
 					} else {
 						ctx.fillRect(x*TILE_SIZE+TILE_SIZE/2-1,y*TILE_SIZE,2,TILE_SIZE/2-2);
+					}
+				} else if (board.wires[x+y*board.size.x] & 0x8) {
+					if (board.signals[x+y*board.size.x] & 0x8) {
+						drawTile(x*TILE_SIZE, y*TILE_SIZE, TILES.logicOutOn.S);
+					} else {
+						drawTile(x*TILE_SIZE, y*TILE_SIZE, TILES.logicOutOff.S);
 					}
 				}
 			} else {
@@ -224,24 +476,24 @@ function draw() {
 				if (board.wires[x+y*board.size.x] & 0x1) {
 					if (board.signals[x+y*board.size.x] & 0x1) { ctx.fillStyle = "#fff"; ++onCount; }
 					else { ctx.fillStyle = "#6b6b6b"; ++offCount; }
-					ctx.fillRect(x*TILE_SIZE+TILE_SIZE/2+2, y*TILE_SIZE+TILE_SIZE/2-1,TILE_SIZE/2-2,2);
+					ctx.fillRect(x*TILE_SIZE+TILE_SIZE/2+1, y*TILE_SIZE+TILE_SIZE/2-1,TILE_SIZE/2-1,2);
 				}
 				if (board.wires[x+y*board.size.x] & 0x2) {
 					if (board.signals[x+y*board.size.x] & 0x2) { ctx.fillStyle = "#fff"; ++onCount; }
 					else { ctx.fillStyle = "#6b6b6b"; ++offCount; }
 					if (board.signals[x+y*board.size.x] & 0x2) ctx.fillStyle = "#fff";
 					else ctx.fillStyle = "#6b6b6b";
-					ctx.fillRect(x*TILE_SIZE+TILE_SIZE/2-1, y*TILE_SIZE+TILE_SIZE/2+2,2,TILE_SIZE/2-2);
+					ctx.fillRect(x*TILE_SIZE+TILE_SIZE/2-1, y*TILE_SIZE+TILE_SIZE/2+1,2,TILE_SIZE/2-1);
 				}
 				if (board.wires[x+y*board.size.x] & 0x4) {
 					if (board.signals[x+y*board.size.x] & 0x4) { ctx.fillStyle = "#fff"; ++onCount; }
 					else { ctx.fillStyle = "#6b6b6b"; ++offCount; }
-					ctx.fillRect(x*TILE_SIZE, y*TILE_SIZE+TILE_SIZE/2-1,TILE_SIZE/2-2,2);
+					ctx.fillRect(x*TILE_SIZE, y*TILE_SIZE+TILE_SIZE/2-1,TILE_SIZE/2-1,2);
 				}
 				if (board.wires[x+y*board.size.x] & 0x8) {
 					if (board.signals[x+y*board.size.x] & 0x8) { ctx.fillStyle = "#fff"; ++onCount; }
 					else { ctx.fillStyle = "#6b6b6b"; ++offCount; }
-					ctx.fillRect(x*TILE_SIZE+TILE_SIZE/2-1, y*TILE_SIZE,2,TILE_SIZE/2-2);
+					ctx.fillRect(x*TILE_SIZE+TILE_SIZE/2-1, y*TILE_SIZE,2,TILE_SIZE/2-1);
 				}
 				if (onCount + offCount > 1) {
 					if (onCount >= offCount) ctx.fillStyle = "#fff";
@@ -257,40 +509,41 @@ function draw() {
 		for (let x = 0; x < board.size.x; ++x) {
 			if (board.buttons[x+y*board.size.x]) {
 				if (board.buttons[x+y*board.size.x] > 1) {
-					ctx.fillStyle = "fff";
-					ctx.fillRect(x*TILE_SIZE+1,y*TILE_SIZE+1, TILE_SIZE-2, TILE_SIZE-3);
-					ctx.fillStyle = "#f2f2f2";
-					ctx.fillRect(x*TILE_SIZE+2,y*TILE_SIZE+2, TILE_SIZE-4, TILE_SIZE-4);
-					ctx.fillStyle = "#d2d2d2";
-					ctx.fillRect(x*TILE_SIZE+2,y*TILE_SIZE+2, TILE_SIZE-4, 1);
+					drawTile(x*TILE_SIZE, y*TILE_SIZE, TILES.buttonDown);
 				} else {
-					ctx.fillStyle = "#6b6b6b";
-					ctx.fillRect(x*TILE_SIZE+1,y*TILE_SIZE+1, TILE_SIZE-2, TILE_SIZE-3);
-					ctx.fillStyle = "#f2f2f2";
-					ctx.fillRect(x*TILE_SIZE+2,y*TILE_SIZE+2, TILE_SIZE-4, TILE_SIZE-3);
-					ctx.fillStyle = "#b8b8b8";
-					ctx.fillRect(x*TILE_SIZE+2,y*TILE_SIZE+2, TILE_SIZE-4, 1);
+					drawTile(x*TILE_SIZE, y*TILE_SIZE, TILES.buttonUp);
 				}
 			}
 		}
 	}
 
+	//draw doors:
+	ctx.globalAlpha = 1.0;
+	for (let y = 0; y < board.size.y; ++y) {
+		for (let x = 0; x < board.size.x; ++x) {
+			if (board.doors[y*board.size.x+x]) {
+				let vert = (isWall(x,y+1) && isWall(x,y-1));
+				if (board.doors[y*board.size.x+x] === 2) {
+					//open door
+					drawTile(TILE_SIZE*x, TILE_SIZE*y, TILES.doorDown);
+				} else {
+					//closed door
+					drawTile(TILE_SIZE*x, TILE_SIZE*y, TILES.doorUp);
+				}
+			}
+		}
+	}
 
 	//draw blob:
-	function drawTile(x,y,tile) {
-		ctx.save();
-		ctx.setTransform(1,0, 0,1, x, ctx.height-y-TILE_SIZE);
-		ctx.drawImage(TILES_IMG, tile.x, TILES_IMG.height-tile.y-TILE_SIZE, TILE_SIZE,TILE_SIZE, 0, 0,TILE_SIZE,TILE_SIZE);
-		ctx.restore();
-	}
+
 	//note: blob uses corner tiles
 	for (let y = 0; y <= board.size.y; ++y) {
 		for (let x = 0; x <= board.size.x; ++x) {
 			let bits = 0;
 			if (x > 0 && y > 0 && board.blob[(y-1)*board.size.x+(x-1)]) bits |= 1;
-			if (y > 0 && board.blob[(y-1)*board.size.x+x]) bits |= 2;
-			if (x > 0 && board.blob[y*board.size.x+(x-1)]) bits |= 4;
-			if (board.blob[y*board.size.x+x]) bits |= 8;
+			if (x < board.size.x && y > 0 && board.blob[(y-1)*board.size.x+x]) bits |= 2;
+			if (x > 0 && y < board.size.y && board.blob[y*board.size.x+(x-1)]) bits |= 4;
+			if (x < board.size.x && y < board.size.y && board.blob[y*board.size.x+x]) bits |= 8;
 			if (bits) {
 				drawTile(TILE_SIZE*x-TILE_SIZE/2, TILE_SIZE*y-TILE_SIZE/2, TILES.blobEdges[bits]);
 			}
@@ -317,28 +570,70 @@ function draw() {
 		}
 	}
 
-	//draw doors:
-	ctx.globalAlpha = 1.0;
-	for (let y = 0; y < board.size.y; ++y) {
-		for (let x = 0; x < board.size.x; ++x) {
-			if (board.doors[y*board.size.x+x]) {
-				let vert = (isWall(x,y+1) && isWall(x,y-1));
-				if (board.doors[y*board.size.x+x] === 2) {
-					//open door
-					drawTile(TILE_SIZE*x, TILE_SIZE*y, TILES.doorDown);
-				} else {
-					//closed door
-					drawTile(TILE_SIZE*x, TILE_SIZE*y, TILES.doorUp);
-				}
-			}
+
+
+	//draw border:
+	drawTile(TILE_SIZE*0, TILE_SIZE*0, TILES.border.SW);
+	drawTile(TILE_SIZE*0, TILE_SIZE*(board.size.y-1), TILES.border.NW);
+	drawTile(TILE_SIZE*(board.size.x-1), TILE_SIZE*0, TILES.border.SE);
+	drawTile(TILE_SIZE*(board.size.x-1), TILE_SIZE*(board.size.y-1), TILES.border.NE);
+	for (let y = 1; y + 1 < board.size.y; ++y) {
+		drawTile(TILE_SIZE*0, TILE_SIZE*y, TILES.border.W);
+		drawTile(TILE_SIZE*(board.size.x-1), TILE_SIZE*y, TILES.border.E);
+	}
+	for (let x = 1; x + 1 < board.size.x; ++x) {
+		drawTile(TILE_SIZE*x, TILE_SIZE*0, TILES.border.S);
+		drawTile(TILE_SIZE*x, TILE_SIZE*(board.size.y-1), TILES.border.N);
+	}
+
+	if (board.exit.x + 1 === board.size.x) {
+		drawTile(TILE_SIZE*board.exit.x + TILE_SIZE/2, TILE_SIZE*board.exit.y, TILES.exit.E);
+	}
+	if (board.exit.y + 1 === board.size.y) {
+		drawTile(TILE_SIZE*board.exit.x, TILE_SIZE*board.exit.y + TILE_SIZE/2, TILES.exit.N);
+	}
+	if (board.exit.x === 0) {
+		drawTile(TILE_SIZE*board.exit.x - TILE_SIZE/2, TILE_SIZE*board.exit.y, TILES.exit.W);
+	}
+	if (board.exit.y === 0) {
+		drawTile(TILE_SIZE*board.exit.x, TILE_SIZE*board.exit.y - TILE_SIZE/2, TILES.exit.S);
+	}
+
+	//grow outline:
+	if ('tx' in mouse) {
+		let g = canGrowTo(mouse.tx, mouse.ty);
+		if (g !== null) {
+			drawTile(mouse.tx*TILE_SIZE, mouse.ty*TILE_SIZE, TILES.blobGrow[g]);
 		}
 	}
 
+	ctx.setTransform(1,0, 0,-1, 0,canvas.height);
+
+	ctx.fillStyle = '#444';
+	if (mouse.overReset) {
+		ctx.fillRect(1,1,SPRITES.reset.width, SPRITES.reset.height);
+	}
+	if (mouse.overUndo) {
+		ctx.fillRect(ctx.width-1-SPRITES.undo.width,1,SPRITES.undo.width, SPRITES.undo.height);
+	}
+
+	if (isWon()) {
+		if (mouse.overNext) {
+			ctx.fillRect(Math.floor((ctx.width-SPRITES.next.width)/2), 10, SPRITES.next.width, SPRITES.next.height);
+		}
+		drawSprite(Math.floor((ctx.width-SPRITES.next.width)/2), 10, SPRITES.next);
+	}
+
+	drawSprite(1,1, SPRITES.reset);
+	drawSprite(ctx.width-1-SPRITES.undo.width,1, SPRITES.undo);
+
 	//draw mouse:
 	if (mouse.x === mouse.x) {
+		ctx.fillStyle = "#fff";
+		ctx.fillRect(mouse.x - 1, mouse.y, 3, 1);
+		ctx.fillRect(mouse.x, mouse.y - 1, 1, 3);
 		ctx.fillStyle = "#000";
-		ctx.fillRect(mouse.x - 10, mouse.y, 20, 1);
-		ctx.fillRect(mouse.x, mouse.y - 10, 1, 20);
+		ctx.fillRect(mouse.x, mouse.y, 1, 1);
 	}
 
 	/*
@@ -374,6 +669,10 @@ function isSolid(tx, ty) {
 	if (board.walls[tx+ty*board.size.x] !== 0) return true;
 	if (board.doors[tx+ty*board.size.x] === 1) return true;
 	return false;
+}
+
+function isWon() {
+	return board.blob[board.exit.x+board.exit.y*board.size.x];
 }
 
 
@@ -494,9 +793,8 @@ function computeSignals() {
 		});
 	}
 
-	console.log("Have " + netsNotNull.length + " nets and " + components.length + " components.");
+	//console.log("Have " + netsNotNull.length + " nets and " + components.length + " components.");
 
-	
 	for (let y = 0; y < board.size.y; ++y) {
 		for (let x = 0; x < board.size.x; ++x) {
 			let signal = 0;
@@ -518,12 +816,31 @@ function computeSignals() {
 			}
 		}
 	}
+
+	components.forEach(function(c){
+		if (c.value()) {
+			board.signals[c.x+c.y*board.size.x] |= 0x80;
+		}
+	});
+}
+
+function canGrowTo(tx, ty) {
+	if (isBlob(tx,ty)) return null; //can't grow where there is already blob
+	if (isSolid(tx,ty)) return null; //can't grow into wall
+	if (isBlob(tx-1,ty)) return 'E';
+	if (isBlob(tx+1,ty)) return 'W';
+	if (isBlob(tx,ty+1)) return 'S';
+	if (isBlob(tx,ty-1)) return 'N';
+	return null;
 }
 
 function growTo(tx, ty) {
 	if (isBlob(tx,ty)) return; //can't grow where there is already blob
 	if (isSolid(tx,ty)) return; //can't grow into wall
 	if (!(isBlob(tx-1,ty) || isBlob(tx+1,ty) || isBlob(tx,ty-1) || isBlob(tx,ty+1))) return; //can't grow if not adjacent to blob
+
+	undoStack.push(board);
+	board = cloneBoard(board);
 
 	//actually grow:
 	board.blob[tx+ty*board.size.x] = 1;
@@ -548,12 +865,26 @@ function setup() {
 		mouse.x = Math.floor( (evt.clientX - rect.left) / rect.width * ctx.width );
 		mouse.y = Math.floor( (evt.clientY - rect.bottom) / -rect.height * ctx.height );
 
-		mouse.tx = Math.floor(mouse.x / TILE_SIZE);
-		mouse.ty = Math.floor(mouse.y / TILE_SIZE);
+		mouse.tx = Math.floor((mouse.x - board.offset.x) / TILE_SIZE);
+		mouse.ty = Math.floor((mouse.y - board.offset.y) / TILE_SIZE);
+
+		function inRect(x,y,w,h) {
+			return (mouse.x >= x && mouse.x < x+w && mouse.y >= y && mouse.y < y+h);
+		}
+
+		mouse.overReset = inRect(1,1,SPRITES.reset.width,SPRITES.reset.height);
+		mouse.overUndo = inRect(ctx.width-1-SPRITES.undo.width,1,SPRITES.undo.width,SPRITES.undo.height);
+		mouse.overNext = inRect(Math.floor((ctx.width-SPRITES.next.width)/2),10,SPRITES.next.width, SPRITES.next.height);
 	}
 
 	function handleDown() {
-		if (mouse.tx >= 0 && mouse.tx < board.size.x && mouse.ty >= 0 && mouse.ty < board.size.y) {
+		if (mouse.overReset) {
+			reset();
+		} else if (mouse.overUndo) {
+			undo();
+		} else if (mouse.overNext) {
+			next();
+		} else if (mouse.tx >= 0 && mouse.tx < board.size.x && mouse.ty >= 0 && mouse.ty < board.size.y) {
 			//check if it's okay to grow to the given tile:
 			growTo(mouse.tx, mouse.ty);
 		}
