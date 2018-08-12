@@ -5,8 +5,78 @@ let ctx = null;
 
 const TILE_SIZE = 10;
 
-const TILES = {
+const TILES_IMG = new Image();
+TILES_IMG.onload = function(){
+	console.log("tiles loaded.");
 };
+TILES_IMG.src = "tiles.png";
+
+const TILES = {
+	//blob edges indexed by filled quadrant:
+	//4 8
+	//1 2
+	blobEdges:[],
+	//wall sides/tops indexed by adjacent walls:
+	//.2.
+	//4 1
+	//.8.
+	wallSides:[],
+	doorUp:null,
+	doorDown:null
+};
+
+(function fill_TILES() {
+	//note: must flip Y for blobMap to match lower-left-origin image layout
+	const blobMap = [
+		0,0,0,1,1,0,0,0,
+		1,0,0,1,1,1,1,1,
+		1,0,0,1,1,1,1,1,
+		0,1,1,1,1,1,1,0,
+		0,1,1,1,1,1,1,0,
+		0,0,0,0,0,1,1,0,
+		0,0,0,0,0,1,1,0,
+		0,0,0,1,1,0,0,0
+	];
+	for (let i = 0; i < 16; ++i) {
+		TILES.blobEdges.push(null);
+		//TILES.wallTops.push(null);
+		TILES.wallSides.push(null);
+	}
+	for (let y = 0; y < 4; ++y) {
+		for (let x = 0; x < 4; ++x) {
+			let bits = 0;
+			if (blobMap[2*x  +(7-2*y  )*8]) bits |= 1;
+			if (blobMap[2*x+1+(7-2*y  )*8]) bits |= 2;
+			if (blobMap[2*x  +(7-2*y-1)*8]) bits |= 4;
+			if (blobMap[2*x+1+(7-2*y-1)*8]) bits |= 8;
+			console.assert(TILES.blobEdges[bits] === null, "No duplicate tiles.");
+			TILES.blobEdges[bits] = {x:5 + TILE_SIZE*x, y: 5 + TILE_SIZE*y};
+		}
+	}
+	//wall tiles are stored in a basic 4-edge order
+	//bits:
+	//.2.
+	//4 1
+	//.8.
+	//NOTE: need to flip Y-coord for this too
+	const wallMap = [
+		0x8,0x9,0xd,0xc,
+		0xa,0xb,0xf,0xe,
+		0x2,0x3,0x7,0x6,
+		0x0,0x1,0x5,0x4,
+	];
+	for (let y = 0; y < 4; ++y) {
+		for (let x = 0; x < 4; ++x) {
+			let bits = wallMap[x+(3-y)*4];
+			console.assert(TILES.wallSides[bits] === null, "No duplicate tiles.");
+			TILES.wallSides[bits] = {x:60 + TILE_SIZE*x, y:TILE_SIZE*y};
+			//console.assert(TILES.wallTops[bits] === null, "No duplicate tiles.");
+			//TILES.wallTops[bits] = {x:100 + TILE_SIZE*x, y:TILE_SIZE*y};
+		}
+	}
+	TILES.doorDown = {x:100, y:0};
+	TILES.doorUp = {x:110, y:0};
+})();
 
 let mouse = { x:NaN, y:NaN };
 
@@ -207,13 +277,27 @@ function draw() {
 
 
 	//draw blob:
-	ctx.globalAlpha = 0.5;
-	for (let y = 0; y < board.size.y; ++y) {
-		for (let x = 0; x < board.size.x; ++x) {
-			if (board.blob[y*board.size.x+x]) {
-				ctx.fillStyle = '#1b1';
-				ctx.fillRect(x*TILE_SIZE+1, y*TILE_SIZE+1, TILE_SIZE-2, TILE_SIZE-2);
+	function drawTile(x,y,tile) {
+		ctx.save();
+		ctx.setTransform(1,0, 0,1, x, ctx.height-y-TILE_SIZE);
+		ctx.drawImage(TILES_IMG, tile.x, TILES_IMG.height-tile.y-TILE_SIZE, TILE_SIZE,TILE_SIZE, 0, 0,TILE_SIZE,TILE_SIZE);
+		ctx.restore();
+	}
+	//note: blob uses corner tiles
+	for (let y = 0; y <= board.size.y; ++y) {
+		for (let x = 0; x <= board.size.x; ++x) {
+			let bits = 0;
+			if (x > 0 && y > 0 && board.blob[(y-1)*board.size.x+(x-1)]) bits |= 1;
+			if (y > 0 && board.blob[(y-1)*board.size.x+x]) bits |= 2;
+			if (x > 0 && board.blob[y*board.size.x+(x-1)]) bits |= 4;
+			if (board.blob[y*board.size.x+x]) bits |= 8;
+			if (bits) {
+				drawTile(TILE_SIZE*x-TILE_SIZE/2, TILE_SIZE*y-TILE_SIZE/2, TILES.blobEdges[bits]);
 			}
+			//if (board.blob[y*board.size.x+x]) {
+			//	ctx.fillStyle = '#1b1';
+			//	ctx.fillRect(x*TILE_SIZE+1, y*TILE_SIZE+1, TILE_SIZE-2, TILE_SIZE-2);
+			//}
 		}
 	}
 
@@ -222,8 +306,13 @@ function draw() {
 	for (let y = 0; y < board.size.y; ++y) {
 		for (let x = 0; x < board.size.x; ++x) {
 			if (board.walls[y*board.size.x+x]) {
-				ctx.fillStyle = '#000';
-				ctx.fillRect(x*TILE_SIZE+1, y*TILE_SIZE+1, TILE_SIZE-2, TILE_SIZE-2);
+				let bits = 0;
+				if (x+1 < board.size.x && board.walls[y*board.size.x+x+1]) bits |= 1;
+				if (y+1 < board.size.y && board.walls[(y+1)*board.size.x+x]) bits |= 2;
+				if (x > 0 && board.walls[y*board.size.x+x-1]) bits |= 4;
+				if (y > 0 && board.walls[(y-1)*board.size.x+x]) bits |= 8;
+
+				drawTile(TILE_SIZE*x, TILE_SIZE*y, TILES.wallSides[bits]);
 			}
 		}
 	}
@@ -236,20 +325,10 @@ function draw() {
 				let vert = (isWall(x,y+1) && isWall(x,y-1));
 				if (board.doors[y*board.size.x+x] === 2) {
 					//open door
-					if (vert) {
-					} else {
-						ctx.fillStyle = '#888';
-						ctx.fillRect(x*TILE_SIZE, y*TILE_SIZE+TILE_SIZE/2-2, TILE_SIZE, 3);
-					}
+					drawTile(TILE_SIZE*x, TILE_SIZE*y, TILES.doorDown);
 				} else {
 					//closed door
-					if (vert) {
-					} else {
-						ctx.fillStyle = '#888';
-						ctx.fillRect(x*TILE_SIZE, y*TILE_SIZE+TILE_SIZE/2-2, TILE_SIZE, TILE_SIZE/2+1);
-						ctx.fillStyle = '#000';
-						ctx.fillRect(x*TILE_SIZE, y*TILE_SIZE+TILE_SIZE-1, TILE_SIZE, 1);
-					}
+					drawTile(TILE_SIZE*x, TILE_SIZE*y, TILES.doorUp);
 				}
 			}
 		}
